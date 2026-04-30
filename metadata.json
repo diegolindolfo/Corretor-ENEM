@@ -1,0 +1,9 @@
+{
+  "name": "Corretor Pro ENEM",
+  "description": "IA especializada na avaliação de redações do ENEM seguindo os manuais oficiais 2025.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "AI-powered text analysis",
+    "Educational assessment"
+  ]
+}

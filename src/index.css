@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Outfit:wght@100..900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --color-glass: rgba(30, 41, 59, 0.5);
+  --color-glass-border: rgba(255, 255, 255, 0.05);
+}
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-50 antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-slate-800/50 backdrop-blur-xl border border-white/5 rounded-xl;
+  }
+  
+  .section-title {
+    @apply text-[10px] uppercase tracking-[0.1em] text-slate-400 font-bold mb-4 flex items-center gap-2;
+  }
+  
+  .section-title::after {
+    content: '';
+    @apply flex-grow h-px bg-slate-800;
+  }
+
+  .status-pill {
+    @apply px-2 py-0.5 rounded text-[10px] font-bold border;
+  }
+  
+  .pill-red { @apply bg-red-500/10 text-red-400 border-red-500/20; }
+  .pill-blue { @apply bg-sky-500/10 text-sky-400 border-sky-500/20; }
+  .pill-green { @apply bg-emerald-500/10 text-emerald-400 border-emerald-500/20; }
+}
+
+.markdown-body {
+  @apply text-slate-300 leading-relaxed;
+}
+
+.markdown-body h1, .markdown-body h2 {
+  @apply font-bold text-slate-100 mt-6 mb-2 border-b border-white/10 pb-2;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
+}
