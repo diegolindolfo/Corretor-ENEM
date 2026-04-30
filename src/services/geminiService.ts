@@ -120,27 +120,28 @@ async function withRetry<T>(
 export async function performOCR(base64Data: string, mimeType: string = "image/jpeg"): Promise<{ text: string, usage?: any }> {
   return withRetry(async (modelName) => {
     const ai = getGenAI();
-    const model = ai.getGenerativeModel({ model: modelName });
     const dataOnly = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          data: dataOnly,
-          mimeType: mimeType
-        }
-      },
-      "Aja como um OCR de alta precisão. Extraia APENAS o texto livre escrito à mão ou impresso nesta redação. Preserve os parágrafos. Não inclua comentários."
-    ]);
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: [
+        {
+          inlineData: {
+            data: dataOnly,
+            mimeType: mimeType
+          }
+        },
+        { text: "Aja como um OCR de alta precisão. Extraia APENAS o texto livre escrito à mão ou impresso nesta redação. Preserve os parágrafos. Não inclua comentários." }
+      ]
+    });
 
-    const response = await result.response;
     return { 
-      text: response.text(),
+      text: response.text || "",
       usage: {
         totalTokens: response.usageMetadata?.totalTokenCount || 0
       }
     };
-  }, 3, "gemini-2.0-flash");
+  }, 3, "gemini-3-flash-preview");
 }
 
 export async function evaluateEssay(essay: string, theme: string): Promise<EvaluationResult> {
@@ -148,17 +149,17 @@ export async function evaluateEssay(essay: string, theme: string): Promise<Evalu
 
   const evaluation = await withRetry(async (modelName) => {
     const ai = getGenAI();
-    const model = ai.getGenerativeModel({ 
+
+    const response = await ai.models.generateContent({ 
       model: modelName,
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: {
+      contents: `Tema do ENEM: ${theme}\n\nManuscrito da Redação:\n${essay}`,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
         responseMimeType: "application/json"
       }
     });
 
-    const result = await model.generateContent(`Tema do ENEM: ${theme}\n\nManuscrito da Redação:\n${essay}`);
-    const response = await result.response;
-    const text = response.text();
+    const text = response.text;
     
     if (!text) throw new Error("Resposta vazia da IA");
     
@@ -170,7 +171,7 @@ export async function evaluateEssay(essay: string, theme: string): Promise<Evalu
     };
     
     return evalResult;
-  }, 3, "gemini-1.5-pro");
+  }, 3, "gemini-3.1-pro-preview");
 
   try {
     const ltResults = await grammarPromise;
