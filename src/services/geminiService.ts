@@ -10,7 +10,7 @@ DIRETRIZES DE EXTRAÇÃO:
 2. Verifique o REPERTÓRIO: Identifique se as citações/dados são reais e se possuem fonte legitimada. Marque como "duvidoso" se a informação parecer inventada ou mal aplicada.
 3. Analise a COMPETÊNCIA 1: Identifique a gravidade dos desvios e liste exemplos encontrados.
 4. Analise a COMPETÊNCIA 4: Identifique se há pelo menos 2 operadores interparágrafos.
-5. Analise a COMPETÊNCIA 5: Verifique rigorosamente os 5 elementos.
+5. Analise a COMPETÊNCIA 5: Verifique rigorosamente os 5 elementos (Agente, Ação, Meio/Modo, Efeito e Detalhamento).
 
 SAÍDA OBRIGATÓRIA (JSON):
 {
@@ -35,7 +35,7 @@ SAÍDA OBRIGATÓRIA (JSON):
       "c4": { "score": number, "nivel": number, "operadores_inter": number, "comentario": "string" },
       "c5": { "score": number, "nivel": number, "elementos": { "agente": boolean, "acao": boolean, "meio": boolean, "efeito": boolean, "detalhamento": boolean }, "comentario": "string" }
     },
-    "sugestao_nota": number,
+    "grade_total": number,
     "parecer_tecnico": "Resumo técnico para o corretor humano tomar a decisão final."
   }
 }
@@ -70,155 +70,123 @@ export interface EvaluationResult {
       c4: { score: number; nivel: number; operadores_inter: number; comentario: string };
       c5: { score: number; nivel: number; elementos: { agente: boolean; acao: boolean; meio: boolean; efeito: boolean; detalhamento: boolean }; comentario: string };
     };
-    sugestao_nota: number;
+    grade_total: number;
     parecer_tecnico: string;
   };
 }
 
-let ai: GoogleGenAI | null = null;
+let genAI: GoogleGenAI | null = null;
 let userApiKey: string | null = null;
 
 export function setUserApiKey(key: string | null) {
   userApiKey = key;
-  ai = null; // Reset singleton when key changes
+  genAI = null;
 }
 
 export function getGenAI() {
-  if (!ai) {
-    const apiKey = userApiKey || process.env.GEMINI_API_KEY;
+  if (!genAI) {
+    const apiKey = userApiKey || (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null);
     if (!apiKey) {
-      throw new Error("Configuração Necessária: Insira sua Chave de API Google nas configurações.");
+      throw new Error("API Key ausente. Configure sua chave Google AI nas configurações.");
     }
-    ai = new GoogleGenAI({ apiKey });
+    genAI = new GoogleGenAI({ apiKey });
   }
-  return ai;
+  return genAI;
 }
 
-export async function performOCR(base64Image: string): Promise<{ text: string, usage?: any }> {
-  // OCR prioritiza latência com Gemini 1.5 Flash
-  return withRetry(async (modelName) => {
-    const ai = getGenAI();
-
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              data: base64Image.split(',')[1] || base64Image,
-              mimeType: "image/jpeg"
-            }
-          },
-          { text: "Transcreva fielmente todo o texto desta redação manuscrita. Não adicione comentários, apenas o texto da redação." }
-        ]
-      }
-    });
-
-    return { 
-      text: response.text || "",
-      usage: response.usageMetadata
-    };
-  });
-}
-
-/**
- * Utilitário para retentar funções assíncronas em caso de erro 429 (Resource Exhausted) ou Sobrecarga.
- */
 async function withRetry<T>(
   fn: (modelName: string) => Promise<T>, 
-  retries = 8, 
-  delay = 4000,
-  originalModel = "gemini-1.5-flash"
+  retries = 3, 
+  originalModel = "gemini-2.0-flash"
 ): Promise<T> {
-  // Se o modelo original for 2.0 e obtivemos erro de "não encontrado", 
-  // ou se já excedemos metade das tentativas, usamos o 1.5-flash que é mais estável.
-  const currentModel = retries <= 4 ? "gemini-1.5-flash" : originalModel;
+  const currentModel = retries < 3 ? "gemini-1.5-flash" : originalModel;
   
   try {
     return await fn(currentModel);
   } catch (error: any) {
-    const errorCode = error?.status || error?.error?.code || error?.code;
-    const errorMessage = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
-    
-    // 404: Modelo não encontrado ou sem acesso
-    const isNotFound = errorCode === 404 || errorMessage?.includes("404") || errorMessage?.includes("NOT_FOUND");
-    
-    const isRateLimit = errorCode === 429 || 
-                       errorMessage?.includes("429") || 
-                       errorMessage?.includes("RESOURCE_EXHAUSTED") ||
-                       errorMessage?.includes("high demand") ||
-                       errorMessage?.includes("overloaded");
-    
-    if (isNotFound && originalModel !== "gemini-1.5-flash") {
-      console.warn(`Modelo ${originalModel} não encontrado. Tentando gemini-1.5-flash...`);
-      return withRetry(fn, retries, delay, "gemini-1.5-flash");
-    }
+    const errorMessage = error?.message || String(error);
+    const isRateLimit = errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED");
+    const isNotFound = errorMessage.includes("404") || errorMessage.includes("NOT_FOUND");
 
-    if (isRateLimit && retries > 0) {
-      const jitter = Math.random() * 2000;
-      const totalDelay = delay + jitter;
-      
-      console.warn(`[Retry ${8 - retries + 1}] Erro de capacidade (${currentModel}). Retentando em ${Math.round(totalDelay)}ms. Erro: ${errorMessage}`);
-      
-      await new Promise(resolve => setTimeout(resolve, totalDelay));
-      // Backoff exponencial: aumenta o delay para a próxima tentativa
-      return withRetry(fn, retries - 1, delay * 1.5, originalModel);
+    if ((isRateLimit || isNotFound) && retries > 0) {
+      const waitTime = isNotFound ? 500 : (4 - retries) * 2000;
+      await new Promise(r => setTimeout(r, waitTime));
+      return withRetry(fn, retries - 1, originalModel);
     }
     throw error;
   }
 }
 
+export async function performOCR(base64Data: string, mimeType: string = "image/jpeg"): Promise<{ text: string, usage?: any }> {
+  return withRetry(async (modelName) => {
+    const ai = getGenAI();
+    const model = ai.getGenerativeModel({ model: modelName });
+    const dataOnly = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          data: dataOnly,
+          mimeType: mimeType
+        }
+      },
+      "Aja como um OCR de alta precisão. Extraia APENAS o texto livre escrito à mão ou impresso nesta redação. Preserve os parágrafos. Não inclua comentários."
+    ]);
+
+    const response = await result.response;
+    return { 
+      text: response.text(),
+      usage: {
+        totalTokens: response.usageMetadata?.totalTokenCount || 0
+      }
+    };
+  }, 3, "gemini-2.0-flash");
+}
+
 export async function evaluateEssay(essay: string, theme: string): Promise<EvaluationResult> {
-  // Inicia verificação gramatical em paralelo para otimizar processamento
   const grammarPromise = checkGrammar(essay);
 
   const evaluation = await withRetry(async (modelName) => {
     const ai = getGenAI();
-
-    const prompt = `
-Tema: ${theme}
-Redação para avaliação:
-${essay}
-  `;
-
-    const response = await ai.models.generateContent({
+    const model = ai.getGenerativeModel({ 
       model: modelName,
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: "application/json",
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: {
+        responseMimeType: "application/json"
       }
     });
 
-    const text = response.text;
-    if (!text) {
-      throw new Error("Resposta vazia da IA.");
-    }
+    const result = await model.generateContent(`Tema do ENEM: ${theme}\n\nManuscrito da Redação:\n${essay}`);
+    const response = await result.response;
+    const text = response.text();
     
-    const result = JSON.parse(text) as EvaluationResult;
-    result.usage = {
+    if (!text) throw new Error("Resposta vazia da IA");
+    
+    const evalResult = JSON.parse(text) as EvaluationResult;
+    evalResult.usage = {
       promptTokens: response.usageMetadata?.promptTokenCount || 0,
       candidatesTokens: response.usageMetadata?.candidatesTokenCount || 0,
       totalTokens: response.usageMetadata?.totalTokenCount || 0
     };
     
-    return result;
-  });
+    return evalResult;
+  }, 3, "gemini-1.5-pro");
 
-  // Integra resultados do LanguageTool à análise da C1
   try {
     const ltResults = await grammarPromise;
     if (ltResults.matches.length > 0) {
       evaluation.redacao_eval.competencias.c1.desvios_count += ltResults.matches.length;
       ltResults.matches.slice(0, 8).forEach(match => {
-        if (!evaluation.redacao_eval.competencias.c1.destaques.includes(match.message)) {
-          evaluation.redacao_eval.competencias.c1.destaques.push(`[LT] ${match.message}`);
+        const item = `[Sugestão] ${match.message}`;
+        if (!evaluation.redacao_eval.competencias.c1.destaques.includes(item)) {
+          evaluation.redacao_eval.competencias.c1.destaques.push(item);
         }
       });
     }
   } catch (e) {
-    console.warn("LanguageTool falhou, prosseguindo apenas com IA", e);
+    console.warn("LanguageTool ignorado", e);
   }
 
   return evaluation;
 }
+

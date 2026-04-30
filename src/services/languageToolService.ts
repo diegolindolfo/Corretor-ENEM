@@ -30,17 +30,23 @@ export async function checkGrammar(text: string): Promise<LanguageToolResult> {
   params.append('language', 'pt-BR');
 
   try {
-    const response = await fetch('https://api.languagetoolplus.com/v2/check', {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+    const response = await fetch('https://api.languagetool.org/v2/check', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
       },
       body: params.toString(),
+      signal: controller.signal
     });
 
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      throw new Error(`LanguageTool API error: ${response.statusText}`);
+      throw new Error(`LanguageTool API error: ${response.status} ${response.statusText}`);
     }
 
     return await response.json();
